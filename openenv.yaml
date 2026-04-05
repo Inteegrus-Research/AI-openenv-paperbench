@@ -1,0 +1,148 @@
+env_id: paper_review_env_v1
+name: OpenEnv-PaperBench
+version: "1.0.0"
+description: >
+  A sequential budget-constrained research paper screening environment.
+  An agent acts as a literature reviewer, assigning relevance labels,
+  quality scores, and ranked justifications to batches of synthetic paper
+  abstracts under a fixed step budget.
+
+domain: research_paper_screening
+language: en
+modality: text
+
+interface:
+  type: http
+  reset_endpoint: /reset
+  step_endpoint: /step
+  health_endpoint: /health
+  tasks_endpoint: /tasks
+
+tasks:
+  - task_id: task1
+    name: Binary Relevance Classification
+    description: >
+      Label each abstract RELEVANT or NOT_RELEVANT against a stated
+      topic criterion. Budget: 12 steps, 10 papers.
+    budget: 12
+    paper_count: 10
+    grader: binary_f1
+    difficulty: easy
+
+  - task_id: task2
+    name: Relevance and Quality Scoring
+    description: >
+      Assign a relevance label and a 1-4 quality score to each abstract.
+      Scored as 0.6 * relevance_F1 + 0.4 * quality_accuracy.
+      Budget: 14 steps, 10 papers.
+    budget: 14
+    paper_count: 10
+    grader: weighted_f1_quality
+    difficulty: medium
+
+  - task_id: task3
+    name: Adversarial Batch Screening
+    description: >
+      Screen a batch containing adversarial red-herring abstracts.
+      Decisions: INCLUDE, EXCLUDE, or DEFER. DEFER counts as EXCLUDE
+      at grading time. Scored as 0.85 * F1 + 0.15 * budget_efficiency.
+      Budget: 15 steps, 15 papers.
+    budget: 15
+    paper_count: 15
+    grader: f1_budget_efficiency
+    difficulty: hard
+
+  - task_id: task4
+    name: Ranking and Justification Under Budget Pressure
+    description: >
+      Produce a ranked top-5 shortlist from a 20-paper batch. INCLUDE
+      decisions require rank (1-5) and a justification (max 200 chars).
+      Budget: 18 steps for 20 papers (structural deficit).
+      Scored as 0.50 * nDCG@5 + 0.35 * F1 + 0.15 * justification_validity.
+    budget: 18
+    paper_count: 20
+    grader: ndcg_f1_justification
+    difficulty: super_hard
+
+action_schema:
+  type: object
+  properties:
+    action_type:
+      type: string
+      enum: [review, submit]
+    paper_id:
+      type: string
+      description: Required when action_type is review.
+    label:
+      type: string
+      description: Task-specific label value.
+    quality_score:
+      type: integer
+      minimum: 1
+      maximum: 4
+      description: Used in task2 and task4.
+    rank:
+      type: integer
+      minimum: 1
+      maximum: 5
+      description: Required for INCLUDE decisions in task4.
+    justification:
+      type: string
+      maxLength: 200
+      description: Required for INCLUDE decisions in task4.
+
+observation_schema:
+  type: object
+  properties:
+    task_id:
+      type: string
+    task_description:
+      type: string
+    step:
+      type: integer
+    budget_remaining:
+      type: integer
+    papers:
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          title: {type: string}
+          abstract: {type: string}
+          topic_hint: {type: string}
+          methodology_hint: {type: string}
+          claimed_contribution: {type: string}
+    decisions_so_far:
+      type: object
+      description: Map of paper_id to most recent action dict.
+    episode_complete:
+      type: boolean
+    final_score:
+      type: number
+      minimum: 0.0
+      maximum: 1.0
+      nullable: true
+    error:
+      type: string
+      nullable: true
+
+reward:
+  type: end_of_episode
+  range: [0.0, 1.0]
+  deterministic: true
+  grading: rule_based
+
+baseline:
+  script: inference.py
+  requires:
+    - API_BASE_URL
+    - MODEL_NAME
+    - HF_TOKEN
+  log_format: "[START]/[STEP]/[END]"
+
+deployment:
+  platform: huggingface_spaces
+  sdk: docker
+  port: 7860
+  health_check: GET /health

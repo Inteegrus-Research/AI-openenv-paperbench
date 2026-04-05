@@ -8,3 +8,4 @@ pytest
 python-dotenv
 tqdm
 rich
+scikit-learn>=1.4.0
